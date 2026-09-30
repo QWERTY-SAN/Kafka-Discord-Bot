@@ -127,7 +127,7 @@ class KafkaBot(commands.Bot):
                 "allowed_mentions": discord.AllowedMentions.none(),
             }
             if index == 0 and reply_to is not None:
-                await destination.reply(chunk, mention_author=False, **kwargs)
+                await reply_to.reply(chunk, mention_author=False, **kwargs)
             else:
                 await destination.send(chunk, **kwargs)
 
