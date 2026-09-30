@@ -1,26 +1,19 @@
-import os
+import logging
 
-from dotenv import load_dotenv
+from bot import create_bot
+from config import load_config
 
-from bot import bot
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
 
 
-def main():
-    load_dotenv()
-
-    token = os.getenv("DISCORD_TOKEN")
-
-    if not token:
-        raise RuntimeError(
-            "DISCORD_TOKEN is not configured."
-        )
-
-    if not os.getenv("GROQ_API_KEY"):
-        raise RuntimeError(
-            "GROQ_API_KEY is not configured."
-        )
-
-    bot.run(token)
+def main() -> None:
+    config = load_config()
+    bot = create_bot(config)
+    bot.run(config.discord_token, log_handler=None)
 
 
 if __name__ == "__main__":
