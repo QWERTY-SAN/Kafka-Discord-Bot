@@ -20,7 +20,7 @@ class AIServiceError(RuntimeError):
 class GeminiClient:
     def __init__(self):
         retry_options = types.HttpRetryOptions(
-            attempts=3,
+            attempts=SETTINGS.max_retries + 1,
             initial_delay=1.0,
             max_delay=8.0,
             exp_base=2.0,
@@ -72,7 +72,7 @@ class GeminiClient:
                 logger.error("Gemini client error %s: %s", status, exc)
                 if status == 400:
                     message = "The request was rejected. Check the bot configuration."
-                elif status == 401 or status == 403:
+                elif status in (401, 403):
                     message = "My Gemini API key isn't working right now."
                 elif status == 404:
                     message = "That Gemini model isn't available right now."
@@ -84,7 +84,10 @@ class GeminiClient:
             except errors.ServerError as exc:
                 status = getattr(exc, "status_code", None)
                 logger.warning("Gemini server error %s: %s", status, exc)
-                raise AIServiceError("Gemini is having trouble right now. Try again shortly.", status) from exc
+                raise AIServiceError(
+                    "Gemini is having trouble right now. Try again shortly.",
+                    status,
+                ) from exc
             except (TimeoutError, asyncio.TimeoutError) as exc:
                 logger.warning("Gemini request timed out: %s", exc)
                 raise AIServiceError("That took too long. Try again in a moment.") from exc
