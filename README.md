@@ -1,6 +1,6 @@
 # Kafka Discord Bot
 
-A modular Discord AI chatbot based on Kafka from *Honkai: Star Rail*, using Groq and `openai/gpt-oss-120b`.
+A modular Discord AI chatbot based on Kafka from *Honkai: Star Rail*, using Gemini and `gemini-3.5-flash-lite`.
 
 ## Features
 
@@ -18,8 +18,8 @@ A modular Discord AI chatbot based on Kafka from *Honkai: Star Rail*, using Groq
 - Input-length protection
 - Discord-safe output splitting
 - Generated mentions disabled to prevent accidental pings
-- Groq reasoning set to `medium` by default
-- Groq retry/timeout configuration
+- Gemini reasoning set to `medium` by default
+- Gemini retry/timeout configuration
 - Structured logging
 
 ## Setup
@@ -31,7 +31,7 @@ A modular Discord AI chatbot based on Kafka from *Honkai: Star Rail*, using Groq
 pip install -r requirements.txt
 ```
 
-3. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN` and `GROQ_API_KEY`.
+3. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN` and `GEMINI_API_KEY`.
 4. Enable **Message Content Intent** for the Discord bot in the Developer Portal.
 5. Start:
 
@@ -44,11 +44,9 @@ python main.py
 See `.env.example`. The important defaults are:
 
 ```env
-GROQ_MODEL=openai/gpt-oss-120b
+GEMINI_MODEL=gemini-3.5-flash-lite
 MAX_OUTPUT_TOKENS=1536
-REASONING_EFFORT=medium
-REASONING_FORMAT=hidden
-TEMPERATURE=0.85
+THINKING_LEVEL=medium
 ```
 
 Never commit `.env` or API keys to GitHub.

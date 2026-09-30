@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands
 
 from config import SETTINGS
-from groq_client import AIServiceError, GroqClient
+from gemini_client import AIServiceError, GeminiClient
 from memory import ConversationMemory
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class KafkaBot(commands.Bot):
             ttl_seconds=SETTINGS.memory_ttl_seconds,
             max_conversations=SETTINGS.max_conversations,
         )
-        self.ai = GroqClient()
+        self.ai = GeminiClient()
         self._cooldowns: dict[tuple[int, int], float] = {}
         self._cooldown_lock = asyncio.Lock()
 

@@ -31,61 +31,49 @@ def _float(name: str, default: float, minimum: float = 0.0) -> float:
 @dataclass(frozen=True)
 class Settings:
     discord_token: str
-    groq_api_key: str
+    gemini_api_key: str
     bot_prefix: str
-    groq_model: str
+    gemini_model: str
     max_history: int
     max_output_tokens: int
-    reasoning_effort: str
-    reasoning_format: str
-    temperature: float
+    thinking_level: str
     user_cooldown: float
     max_concurrent_requests: int
     request_timeout: float
-    max_retries: int
     memory_ttl_seconds: int
     max_conversations: int
     max_input_chars: int
+    port: int
 
     @classmethod
     def load(cls) -> "Settings":
         discord_token = os.getenv("DISCORD_TOKEN", "").strip()
-        groq_api_key = os.getenv("GROQ_API_KEY", "").strip()
+        gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
 
         if not discord_token:
             raise RuntimeError("DISCORD_TOKEN is not configured.")
-        if not groq_api_key:
-            raise RuntimeError("GROQ_API_KEY is not configured.")
+        if not gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY is not configured.")
 
-        reasoning_effort = os.getenv("REASONING_EFFORT", "medium").strip().lower()
-        if reasoning_effort not in {"low", "medium", "high"}:
-            raise RuntimeError("REASONING_EFFORT must be low, medium, or high.")
-
-        reasoning_format = os.getenv("REASONING_FORMAT", "hidden").strip().lower()
-        if reasoning_format not in {"hidden", "raw", "parsed"}:
-            raise RuntimeError("REASONING_FORMAT must be hidden, raw, or parsed.")
-
-        temperature = _float("TEMPERATURE", 0.85, 0.0)
-        if temperature > 2.0:
-            raise RuntimeError("TEMPERATURE must be <= 2.0.")
+        thinking_level = os.getenv("THINKING_LEVEL", "medium").strip().lower()
+        if thinking_level not in {"minimal", "low", "medium", "high"}:
+            raise RuntimeError("THINKING_LEVEL must be minimal, low, medium, or high.")
 
         return cls(
             discord_token=discord_token,
-            groq_api_key=groq_api_key,
+            gemini_api_key=gemini_api_key,
             bot_prefix=os.getenv("BOT_PREFIX", "k!").strip() or "k!",
-            groq_model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip(),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip(),
             max_history=_int("MAX_HISTORY", 16, 2),
-            max_output_tokens=_int("MAX_OUTPUT_TOKENS", 1536, 128),
-            reasoning_effort=reasoning_effort,
-            reasoning_format=reasoning_format,
-            temperature=temperature,
+            max_output_tokens=_int("MAX_OUTPUT_TOKENS", 1024, 128),
+            thinking_level=thinking_level,
             user_cooldown=_float("USER_COOLDOWN", 2.0, 0.0),
             max_concurrent_requests=_int("MAX_CONCURRENT_REQUESTS", 3, 1),
             request_timeout=_float("REQUEST_TIMEOUT", 45.0, 5.0),
-            max_retries=_int("MAX_RETRIES", 2, 0),
             memory_ttl_seconds=_int("MEMORY_TTL_SECONDS", 21600, 60),
             max_conversations=_int("MAX_CONVERSATIONS", 500, 1),
             max_input_chars=_int("MAX_INPUT_CHARS", 6000, 100),
+            port=_int("PORT", 10000, 1),
         )
 
 
