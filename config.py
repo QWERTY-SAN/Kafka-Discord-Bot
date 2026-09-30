@@ -57,8 +57,9 @@ class Settings:
     emojis_enabled: bool
     gif_enabled: bool
     gif_mode: str
-    gif_url: str
+    gif_urls: tuple[str, ...]
     gif_cooldown_seconds: int
+    gif_recent_count: int
 
     @classmethod
     def load(cls) -> "Settings":
@@ -80,10 +81,33 @@ class Settings:
                 "KAFKA_GIF_MODE must be off, first_reply, every_mention, every_command, or every_response."
             )
 
-        gif_url = os.getenv(
-            "KAFKA_GIF_URL",
-            "https://www.gifcen.com/wp-content/uploads/2023/08/kafka-gif-6.gif",
-        ).strip()
+        # Deliberately different Kafka GIFs from Tenor.
+        # These are distinct source GIFs/scenes rather than URL aliases for one file.
+        default_gif_urls = (
+            "https://media1.tenor.com/m/jk1DQng45UMAAAAd/kafka-honkai-star-rail.gif",  # lipstick
+            "https://media1.tenor.com/m/4oUmL1Rw4TAAAAAd/kafka-honkai-star-rail.gif",      # music/anime
+            "https://media1.tenor.com/m/6RXMiM9te7AAAAAd/kafka-honkai-star-rail.gif",      # sunglasses
+            "https://media1.tenor.com/m/ohGFZ5rSIGcAAAAd/kafka-honkai-star-rail.gif",      # close-up
+            "https://media1.tenor.com/m/b43Ulcgmd-UAAAAd/kafka-kafka-hsr.gif",              # edited Kafka
+            "https://media.tenor.com/Z-qCHXJsDwoAAAAM/kafka.gif",                           # related Kafka
+            "https://media.tenor.com/cnLV4z_5mOMAAAAM/kafka-honkai-star-rail.gif",          # related Kafka
+            "https://media.tenor.com/g320Vzn5bHEAAAAM/kafka-banner.gif",                    # banner/close-up
+            "https://media.tenor.com/aDWOgEh1GycAAAAM/kafka-honkai.gif",                    # phone/scene
+            "https://media.tenor.com/_RiBHVVH-wIAAAAM/kafka-kafka-pat.gif",                # pat reaction
+            "https://media.tenor.com/QDXaFgSJMAcAAAAM/kafka-kafka-honkai.gif",              # balcony scene
+        )
+
+        gif_urls_raw = os.getenv("KAFKA_GIF_URLS", "").strip()
+        custom_gif_urls = tuple(
+            url.strip()
+            for url in gif_urls_raw.split(",")
+            if url.strip()
+        )
+
+        # The old single KAFKA_GIF_URL variable is intentionally ignored.
+        # This prevents an old Render environment variable from overriding the
+        # random pool and making the bot send the same GIF forever.
+        gif_urls = tuple(dict.fromkeys(default_gif_urls + custom_gif_urls))
 
         return cls(
             discord_token=discord_token,
@@ -104,8 +128,9 @@ class Settings:
             emojis_enabled=_bool("EMOJIS_ENABLED", True),
             gif_enabled=_bool("KAFKA_GIF_ENABLED", True),
             gif_mode=gif_mode,
-            gif_url=gif_url,
-            gif_cooldown_seconds=_int("KAFKA_GIF_COOLDOWN_SECONDS", 21600, 0),
+            gif_urls=gif_urls,
+            gif_cooldown_seconds=_int("KAFKA_GIF_COOLDOWN_SECONDS", 300, 0),
+            gif_recent_count=_int("KAFKA_GIF_RECENT_COUNT", 3, 0),
         )
 
 

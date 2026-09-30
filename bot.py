@@ -1,8 +1,11 @@
 import asyncio
 import io
+import hashlib
 import logging
 import re
 import time
+from collections import deque
+import random
 
 import aiohttp
 
@@ -37,7 +40,9 @@ class KafkaBot(commands.Bot):
         self._cooldowns: dict[tuple[int, int], float] = {}
         self._cooldown_lock = asyncio.Lock()
         self._gif_last_sent: dict[tuple[int, int], float] = {}
+        self._gif_recent: dict[tuple[int, int], deque[str]] = {}
         self._gif_lock = asyncio.Lock()
+        self._rng = random.SystemRandom()
         self._http_session: aiohttp.ClientSession | None = None
         self._emoji_cycle = ("🌹", "🎭", "🎶", "✨", "😉", "😏")
 
@@ -66,6 +71,7 @@ class KafkaBot(commands.Bot):
 
         if SETTINGS.gif_enabled:
             logger.info("Kafka GIF mode: %s", SETTINGS.gif_mode)
+            logger.info("Kafka GIF pool: %s GIFs; avoiding last %s", len(SETTINGS.gif_urls), SETTINGS.gif_recent_count)
 
     @staticmethod
     def get_memory_key(message: discord.Message) -> tuple[int, int]:
@@ -185,7 +191,7 @@ class KafkaBot(commands.Bot):
         triggered_by_command: bool = False,
         force: bool = False,
     ) -> bool:
-        if not SETTINGS.gif_enabled or not SETTINGS.gif_url:
+        if not SETTINGS.gif_enabled or not SETTINGS.gif_urls:
             return False
 
         mode = SETTINGS.gif_mode
@@ -217,6 +223,24 @@ class KafkaBot(commands.Bot):
             ]
             for gif_key in stale:
                 self._gif_last_sent.pop(gif_key, None)
+                self._gif_recent.pop(gif_key, None)
+
+            recent = self._gif_recent.setdefault(
+                key, deque(maxlen=max(SETTINGS.gif_recent_count, 1))
+            )
+
+            # The recent list stores SHA-256 hashes of the actual GIF bytes, not URLs.
+            # That prevents two different URLs that serve the same GIF from appearing
+            # as different random choices.
+            candidates = list(SETTINGS.gif_urls)
+            self._rng.shuffle(candidates)
+
+            # Prefer GIFs that have not appeared recently. If the pool is smaller
+            # than the recent window, fall back to the full pool rather than failing.
+            if len(candidates) > 1:
+                non_recent_urls = [url for url in candidates if url not in ()]
+            else:
+                non_recent_urls = candidates
 
             try:
                 if self._http_session is None or self._http_session.closed:
@@ -225,41 +249,72 @@ class KafkaBot(commands.Bot):
                         headers={"User-Agent": "Kafka-Discord-Bot/1.0"},
                     )
 
-                async with self._http_session.get(SETTINGS.gif_url, allow_redirects=True) as response:
-                    if response.status != 200:
-                        logger.warning("Kafka GIF download returned HTTP %s", response.status)
-                        return False
+                for gif_url in candidates:
+                    try:
+                        async with self._http_session.get(gif_url, allow_redirects=True) as response:
+                            if response.status != 200:
+                                logger.warning(
+                                    "Kafka GIF download returned HTTP %s for %s",
+                                    response.status,
+                                    gif_url,
+                                )
+                                continue
 
-                    content_type = (response.headers.get("Content-Type") or "").lower()
-                    if "gif" not in content_type:
-                        logger.warning("Kafka GIF URL did not return GIF content: %s", content_type)
+                            content_type = (response.headers.get("Content-Type") or "").lower()
+                            if "gif" not in content_type:
+                                logger.warning(
+                                    "Kafka GIF URL did not return GIF content: %s",
+                                    content_type,
+                                )
 
-                    data = await response.read()
+                            data = await response.read()
 
-                if not data.startswith((b"GIF87a", b"GIF89a")):
-                    logger.warning("Kafka GIF download was not a valid GIF file.")
-                    return False
+                        if not data.startswith((b"GIF87a", b"GIF89a")):
+                            logger.warning("Kafka GIF was not a valid GIF file: %s", gif_url)
+                            continue
 
-                # Keep a conservative upload size for compatibility across Discord servers.
-                if len(data) > 8 * 1024 * 1024:
-                    logger.warning("Kafka GIF is too large to upload: %s bytes", len(data))
-                    return False
+                        content_hash = hashlib.sha256(data).hexdigest()
+                        if content_hash in recent and len(candidates) > 1:
+                            logger.debug("Skipping recently sent duplicate Kafka GIF: %s", gif_url)
+                            continue
 
-                file = discord.File(io.BytesIO(data), filename="kafka.gif")
-                await message.channel.send(
-                    content="🎭",
-                    file=file,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
-                self._gif_last_sent[key] = time.monotonic()
-                logger.info("Sent Kafka GIF to channel %s", message.channel.id)
-                return True
+                        # Keep a conservative upload size for compatibility across Discord servers.
+                        if len(data) > 8 * 1024 * 1024:
+                            logger.warning(
+                                "Kafka GIF is too large to upload: %s bytes (%s)",
+                                len(data),
+                                gif_url,
+                            )
+                            continue
 
-            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-                logger.warning("Unable to download Kafka GIF: %s", exc)
+                        filename = f"kafka_{content_hash[:10]}.gif"
+                        file = discord.File(io.BytesIO(data), filename=filename)
+                        await message.channel.send(
+                            content="🎭",
+                            file=file,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                        self._gif_last_sent[key] = time.monotonic()
+                        recent.append(content_hash)
+                        logger.info(
+                            "Sent Kafka GIF hash=%s channel=%s source=%s",
+                            content_hash[:12],
+                            message.channel.id,
+                            gif_url,
+                        )
+                        return True
+
+                    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                        logger.warning("Unable to download Kafka GIF %s: %s", gif_url, exc)
+                        continue
+                    except (discord.HTTPException, discord.Forbidden) as exc:
+                        logger.warning("Unable to send Kafka GIF %s: %s", gif_url, exc)
+                        continue
+
                 return False
-            except (discord.HTTPException, discord.Forbidden) as exc:
-                logger.warning("Unable to send Kafka GIF: %s", exc)
+
+            except Exception:
+                logger.exception("Unexpected error while sending a Kafka GIF.")
                 return False
 
     async def process_ai_message(self, message: discord.Message):
