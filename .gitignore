@@ -1,11 +1,6 @@
 .env
-.env.*
-!.env.example
 __pycache__/
-*.py[cod]
+*.pyc
 .venv/
 venv/
 .vscode/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/

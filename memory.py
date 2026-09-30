@@ -1,89 +1,110 @@
-from __future__ import annotations
-
+import asyncio
 import time
 from collections import OrderedDict, deque
-from collections.abc import Hashable
-from typing import TypedDict
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator
 
 
-class Message(TypedDict):
-    role: str
-    content: str
+@dataclass
+class Conversation:
+    messages: deque[dict[str, str]]
+    last_access: float = field(default_factory=time.monotonic)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class ConversationMemory:
-    def __init__(
-        self,
-        max_history: int = 16,
-        max_conversations: int = 500,
-        ttl_seconds: float = 21600,
-    ):
+    def __init__(self, max_history: int = 16, ttl_seconds: int = 21600, max_conversations: int = 500):
         self.max_history = max_history
-        self.max_conversations = max_conversations
         self.ttl_seconds = ttl_seconds
-        self._conversations: OrderedDict[
-            Hashable, deque[Message]
-        ] = OrderedDict()
-        self._last_used: dict[Hashable, float] = {}
+        self.max_conversations = max_conversations
+        self._conversations: OrderedDict[Any, Conversation] = OrderedDict()
+        self._index_lock = asyncio.Lock()
 
-    def _is_expired(self, key: Hashable, now: float) -> bool:
-        last_used = self._last_used.get(key)
-        return last_used is not None and (now - last_used) >= self.ttl_seconds
+    def _expired(self, conversation: Conversation, now: float) -> bool:
+        return now - conversation.last_access >= self.ttl_seconds
 
-    def _touch(self, key: Hashable, now: float | None = None) -> None:
-        now = time.monotonic() if now is None else now
-        self._last_used[key] = now
-        self._conversations.move_to_end(key)
+    async def _get_or_create(self, key: Any) -> Conversation:
+        async with self._index_lock:
+            now = time.monotonic()
+            self._prune_locked(now)
+            conversation = self._conversations.get(key)
+            if conversation is None:
+                conversation = Conversation(deque(maxlen=self.max_history))
+                self._conversations[key] = conversation
+            else:
+                conversation.last_access = now
+                self._conversations.move_to_end(key)
+            self._enforce_limit_locked()
+            return conversation
 
-    def _ensure(self, key: Hashable) -> deque[Message]:
-        now = time.monotonic()
-
-        if key in self._conversations and self._is_expired(key, now):
-            self.reset(key)
-
-        conversation = self._conversations.get(key)
-
-        if conversation is None:
-            while len(self._conversations) >= self.max_conversations:
-                oldest_key, _ = self._conversations.popitem(last=False)
-                self._last_used.pop(oldest_key, None)
-
-            conversation = deque(maxlen=self.max_history)
-            self._conversations[key] = conversation
-
-        self._touch(key, now)
-        return conversation
-
-    def get(self, key: Hashable) -> list[Message]:
-        conversation = self._ensure(key)
-        return list(conversation)
-
-    def add_turn(self, key: Hashable, user_content: str, assistant_content: str) -> None:
-        conversation = self._ensure(key)
-        conversation.append({"role": "user", "content": user_content})
-        conversation.append({"role": "assistant", "content": assistant_content})
-        self._touch(key)
-
-    def reset(self, key: Hashable) -> None:
-        self._conversations.pop(key, None)
-        self._last_used.pop(key, None)
-
-    def clear_all(self) -> None:
-        self._conversations.clear()
-        self._last_used.clear()
-
-    def cleanup_expired(self) -> int:
-        now = time.monotonic()
+    def _prune_locked(self, now: float) -> None:
         expired = [
             key
-            for key in self._conversations
-            if self._is_expired(key, now)
+            for key, conversation in self._conversations.items()
+            if self._expired(conversation, now)
         ]
-
         for key in expired:
-            self.reset(key)
+            self._conversations.pop(key, None)
 
-        return len(expired)
+    def _enforce_limit_locked(self) -> None:
+        while len(self._conversations) > self.max_conversations:
+            removable_key = next(
+                (key for key, conversation in self._conversations.items() if not conversation.lock.locked()),
+                None,
+            )
+            if removable_key is None:
+                break
+            self._conversations.pop(removable_key, None)
 
-    def __len__(self) -> int:
-        return len(self._conversations)
+    @asynccontextmanager
+    async def session(self, key: Any) -> AsyncIterator["ConversationSession"]:
+        conversation = await self._get_or_create(key)
+        async with conversation.lock:
+            conversation.last_access = time.monotonic()
+            self._conversations.move_to_end(key)
+            yield ConversationSession(conversation)
+
+    async def get(self, key: Any) -> list[dict[str, str]]:
+        conversation = await self._get_or_create(key)
+        async with conversation.lock:
+            conversation.last_access = time.monotonic()
+            self._conversations.move_to_end(key)
+            return [dict(message) for message in conversation.messages]
+
+    async def commit_turn(self, key: Any, user_content: str, assistant_content: str) -> None:
+        conversation = await self._get_or_create(key)
+        async with conversation.lock:
+            ConversationSession(conversation).commit(user_content, assistant_content)
+
+    async def reset(self, key: Any) -> None:
+        async with self._index_lock:
+            conversation = self._conversations.get(key)
+        if conversation is None:
+            return
+        async with conversation.lock:
+            async with self._index_lock:
+                self._conversations.pop(key, None)
+
+    async def clear_all(self) -> None:
+        async with self._index_lock:
+            self._conversations.clear()
+
+    async def count(self) -> int:
+        async with self._index_lock:
+            self._prune_locked(time.monotonic())
+            return len(self._conversations)
+
+
+@dataclass
+class ConversationSession:
+    conversation: Conversation
+
+    @property
+    def history(self) -> list[dict[str, str]]:
+        return [dict(message) for message in self.conversation.messages]
+
+    def commit(self, user_content: str, assistant_content: str) -> None:
+        self.conversation.messages.append({"role": "user", "content": user_content})
+        self.conversation.messages.append({"role": "assistant", "content": assistant_content})
+        self.conversation.last_access = time.monotonic()
